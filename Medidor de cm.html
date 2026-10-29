@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Medidor de cm</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Instrument+Sans:wght@400;600&display=swap">
+<style>
+:root{--bg:#f6f4ec;--surface:#ffffff;--ink:#1c2321;--muted:#5d6764;--tape:#f2c230;--tape-ink:#1c2321;--line:#d9d5c7;--cal:#0a7d6c;--meas:#d2381f;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161a19;--surface:#1f2524;--ink:#eeeadd;--muted:#a1aaa6;--tape:#f2c230;--tape-ink:#1c2321;--line:#343c3a;--cal:#3fc9b0;--meas:#ff7a5f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#161a19;--surface:#1f2524;--ink:#eeeadd;--muted:#a1aaa6;--line:#343c3a;--cal:#3fc9b0;--meas:#ff7a5f;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Instrument Sans",system-ui,sans-serif;line-height:1.5}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+.tape{height:18px;margin:0 -16px 20px;background:var(--tape);background-image:repeating-linear-gradient(90deg,var(--tape-ink) 0 1px,transparent 1px 8px),repeating-linear-gradient(90deg,var(--tape-ink) 0 2px,transparent 2px 40px);background-size:100% 6px,100% 12px;background-repeat:no-repeat;background-position:top,top}
+h1{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:clamp(2rem,7vw,3rem);line-height:1.05;margin:0 0 6px;letter-spacing:-.02em}
+.lead{color:var(--muted);margin:0 0 20px;max-width:56ch}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button,select,input[type=number]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-height:44px}
+button.primary{background:var(--tape);color:var(--tape-ink);border-color:var(--tape);font-weight:600}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--cal);outline-offset:2px}
+input[type=number]{width:96px}
+label.f{font-weight:600;display:block;margin-bottom:6px}
+#stage{position:relative;display:none}
+canvas{width:100%;display:block;border-radius:8px;touch-action:manipulation;cursor:crosshair;background:var(--line)}
+.step{font-weight:600;padding:10px 12px;border-radius:8px;border-left:6px solid var(--cal);background:var(--bg);margin-bottom:12px}
+.step.m{border-left-color:var(--meas)}
+ul{list-style:none;padding:0;margin:0}
+li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:1.1rem}
+li:last-child{border-bottom:0}
+li b{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-size:1.3rem}
+.hint{color:var(--muted);font-size:.9rem;margin:10px 0 0}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main>
+<div class="tape"></div>
+<h1>Quantos cm tem?</h1>
+<p class="lead">Tire uma foto do objeto ao lado de algo de tamanho conhecido, como um cartão de banco. Depois toque nas pontas e veja a medida em centímetros.</p>
+
+<div class="card">
+  <div class="row">
+    <button class="primary" id="pick">Tirar foto ou escolher imagem</button>
+    <input id="file" type="file" accept="image/*" class="hide">
+  </div>
+  <p class="hint">Dica: fotografe de cima, com a câmera paralela à superfície, e deixe a referência no mesmo plano do objeto.</p>
+</div>
+
+<div class="card hide" id="refcard">
+  <label class="f" for="ref">Objeto de referência na foto</label>
+  <div class="row">
+    <select id="ref">
+      <option value="8.56">Cartão de banco (largura 8,56 cm)</option>
+      <option value="5.398">Cartão de banco (altura 5,4 cm)</option>
+      <option value="21">Folha A4 (lado curto 21 cm)</option>
+      <option value="29.7">Folha A4 (lado longo 29,7 cm)</option>
+      <option value="2.7">Moeda de R$ 1 (diâmetro 2,7 cm)</option>
+      <option value="custom">Outro tamanho…</option>
+    </select>
+    <span id="customwrap" class="hide"><input id="custom" type="number" min="0.1" step="0.1" placeholder="cm" aria-label="Tamanho da referência em cm"></span>
+    <button id="recal">Recalibrar</button>
+  </div>
+</div>
+
+<div id="stage" class="card">
+  <div id="step" class="step"></div>
+  <canvas id="cv" aria-label="Foto para medir"></canvas>
+  <div class="row" style="margin-top:12px">
+    <button id="undo">Desfazer</button>
+    <button id="clear">Limpar medidas</button>
+  </div>
+</div>
+
+<div class="card hide" id="results">
+  <label class="f">Medidas</label>
+  <ul id="list"></ul>
+</div>
+</main>
+
+<script>
+(function(){
+var $=function(id){return document.getElementById(id)};
+var cv=$('cv'),ctx=cv.getContext('2d');
+var img=null,scale=1,pxPerCm=null,mode='cal',pending=null,calSeg=null,meas=[];
+var cssVar=function(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()};
+var fmt=function(v){return v.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})};
+
+function refCm(){var v=$('ref').value;return v==='custom'?parseFloat($('custom').value):parseFloat(v)}
+
+function setStep(){
+  var s=$('step');
+  if(mode==='cal'){
+    s.className='step';
+    s.textContent=pending?'Agora toque na outra ponta da referência.':'Passo 1: toque numa ponta da referência ('+(isNaN(refCm())?'defina o tamanho':fmt(refCm())+' cm')+').';
+  }else{
+    s.className='step m';
+    s.textContent=pending?'Toque na outra ponta do que quer medir.':'Passo 2: toque numa ponta do objeto que quer medir.';
+  }
+}
+
+function layout(){
+  if(!img)return;
+  var w=cv.parentElement.clientWidth-0;
+  var dpr=window.devicePixelRatio||1;
+  scale=w/img.width;
+  var h=img.height*scale;
+  cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);
+  cv.style.height=h+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  draw();
+}
+
+function dot(p,color){
+  ctx.beginPath();ctx.arc(p.x*scale,p.y*scale,7,0,6.283);
+  ctx.fillStyle=color;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();
+}
+function seg(a,b,color,label,dash){
+  ctx.save();
+  ctx.lineWidth=3;ctx.strokeStyle=color;ctx.setLineDash(dash?[8,6]:[]);
+  ctx.beginPath();ctx.moveTo(a.x*scale,a.y*scale);ctx.lineTo(b.x*scale,b.y*scale);ctx.stroke();
+  ctx.restore();
+  dot(a,color);dot(b,color);
+  if(label){
+    var mx=(a.x+b.x)/2*scale,my=(a.y+b.y)/2*scale;
+    ctx.font='700 16px "Instrument Sans",system-ui,sans-serif';
+    var tw=ctx.measureText(label).width+16;
+    ctx.fillStyle=color;
+    ctx.fillRect(mx-tw/2,my-30,tw,26);
+    ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(label,mx,my-17);
+  }
+}
+function draw(){
+  if(!img)return;
+  ctx.drawImage(img,0,0,img.width*scale,img.height*scale);
+  var cal=cssVar('--cal'),me=cssVar('--meas');
+  if(calSeg)seg(calSeg[0],calSeg[1],cal,fmt(refCm())+' cm (ref.)',true);
+  meas.forEach(function(m){seg(m.a,m.b,me,fmt(m.cm)+' cm',false)});
+  if(pending)dot(pending,mode==='cal'?cal:me);
+}
+
+function list(){
+  var ul=$('list');ul.innerHTML='';
+  meas.forEach(function(m,i){
+    var li=document.createElement('li');
+    li.innerHTML='<span>Medida '+(i+1)+'</span><b>'+fmt(m.cm)+' cm</b>';
+    ul.appendChild(li);
+  });
+  $('results').classList.toggle('hide',meas.length===0);
+}
+
+cv.addEventListener('click',function(e){
+  if(!img)return;
+  var r=cv.getBoundingClientRect();
+  var p={x:(e.clientX-r.left)/scale,y:(e.clientY-r.top)/scale};
+  if(mode==='cal'){
+    if(isNaN(refCm())||refCm()<=0){setStep();$('step').textContent='Informe o tamanho da referência em cm antes de marcar.';return}
+  }
+  if(!pending){pending=p}
+  else{
+    var d=Math.hypot(p.x-pending.x,p.y-pending.y);
+    if(d<3){pending=null}
+    else if(mode==='cal'){
+      calSeg=[pending,p];pxPerCm=d/refCm();mode='measure';pending=null;
+      meas=meas.map(function(m){return{a:m.a,b:m.b,cm:Math.hypot(m.b.x-m.a.x,m.b.y-m.a.y)/pxPerCm}});
+      list();
+    }else{
+      meas.push({a:pending,b:p,cm:d/pxPerCm});pending=null;list();
+    }
+  }
+  setStep();draw();
+});
+
+$('undo').onclick=function(){
+  if(pending){pending=null}
+  else if(meas.length){meas.pop();list()}
+  setStep();draw();
+};
+$('clear').onclick=function(){meas=[];pending=null;list();setStep();draw()};
+$('recal').onclick=function(){mode='cal';pending=null;calSeg=null;pxPerCm=null;setStep();draw()};
+$('ref').onchange=function(){
+  $('customwrap').classList.toggle('hide',$('ref').value!=='custom');
+  mode='cal';pending=null;calSeg=null;pxPerCm=null;setStep();draw();
+};
+$('custom').oninput=function(){setStep()};
+$('pick').onclick=function(){$('file').click()};
+$('file').onchange=function(){
+  var f=this.files&&this.files[0];if(!f)return;
+  var url=URL.createObjectURL(f),im=new Image();
+  im.onload=function(){
+    img=im;mode='cal';pending=null;calSeg=null;pxPerCm=null;meas=[];list();
+    $('stage').style.display='block';$('refcard').classList.remove('hide');
+    layout();setStep();
+    $('stage').scrollIntoView({behavior:'smooth',block:'start'});
+  };
+  im.src=url;
+};
+window.addEventListener('resize',layout);
+})();
+</script>
+</body>
+</html>
